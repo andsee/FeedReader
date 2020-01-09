@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Text.RegularExpressions;
     using System.Threading.Tasks;
     using HtmlAgilityPack;
     using Parser;
@@ -95,7 +96,7 @@
         public static async Task<IEnumerable<HtmlFeedLink>> GetFeedUrlsFromUrlAsync(string url, bool autoRedirect = true)
         {
             url = GetAbsoluteUrl(url);
-            string pageContent = await Helpers.DownloadAsync(url, autoRedirect).ConfigureAwait(false);
+            string pageContent = await Helpers.DownloadAsync(url, autoRedirect);
             var links = ParseFeedUrlsFromHtml(pageContent);
             return links;
         }
@@ -118,7 +119,7 @@
         /// <returns>a list of links, an empty list if no links are found</returns>
         public static async Task<string[]> ParseFeedUrlsAsStringAsync(string url)
         {
-            return (await GetFeedUrlsFromUrlAsync(url).ConfigureAwait(false)).Select(x => x.Url).ToArray();
+            return (await GetFeedUrlsFromUrlAsync(url)).Select(x => x.Url).ToArray();
         }
 
         /// <summary>
@@ -182,7 +183,7 @@
         /// <returns>parsed feed</returns>
         public static async Task<Feed> ReadAsync(string url, bool autoRedirect = true)
         {
-            string feedContent = await Helpers.DownloadAsync(GetAbsoluteUrl(url), autoRedirect).ConfigureAwait(false);
+            string feedContent = await Helpers.DownloadAsync(GetAbsoluteUrl(url), autoRedirect);
             return ReadFromString(feedContent);
         }
 
