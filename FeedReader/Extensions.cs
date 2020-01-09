@@ -8,7 +8,7 @@
     /// <summary>
     /// Extension methods
     /// </summary>
-    internal static class Extensions
+    public static class Extensions
     {
         /// <summary>
         /// Decodes a html encoded string

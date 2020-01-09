@@ -99,7 +99,7 @@
             var categories = item.GetElements("category");
             this.Categories = categories.Select(x => x.GetValue()).ToList();
 
-            this.Content = item.GetValue("content").HtmlDecode();
+            this.Content = item.GetValue("content");//.HtmlDecode();
             this.Contributor = new AtomPerson(item.GetElement("contributor"));
             this.Id = item.GetValue("id");
 

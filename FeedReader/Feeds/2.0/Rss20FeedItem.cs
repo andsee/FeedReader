@@ -95,7 +95,7 @@
 
             this.Guid = item.GetValue("guid");
             this.Description = item.GetValue("description");
-            this.Content = item.GetValue("content:encoded")?.HtmlDecode();
+            this.Content = item.GetValue("content:encoded");//?.HtmlDecode();
         }
 
         /// <inheritdoc/>
