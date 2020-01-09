@@ -5,6 +5,7 @@
     using System.Linq;
     using System.Text.RegularExpressions;
     using System.Threading.Tasks;
+    using HtmlAgilityPack;
     using Parser;
 
     /// <summary>
@@ -29,7 +30,13 @@
         /// <example>GetUrl("codehollow.com"); => returns https://codehollow.com</example>
         public static string GetAbsoluteUrl(string url)
         {
-            return new UriBuilder(url).ToString();
+            UriBuilder uri = new UriBuilder(url);
+            if (uri.Port == 80 || uri.Port == 443)
+            {
+                uri.Port = -1;
+            }
+
+            return uri.ToString();
         }
 
         /// <summary>
@@ -125,7 +132,7 @@
             // sample link:
             // <link rel="alternate" type="application/rss+xml" title="Microsoft Bot Framework Blog" href="http://blog.botframework.com/feed.xml">
             // <link rel="alternate" type="application/atom+xml" title="Aktuelle News von heise online" href="https://www.heise.de/newsticker/heise-atom.xml">
-            var htmlDoc = new HtmlAgilityPack.HtmlDocument()
+            var htmlDoc = new HtmlDocument()
             {
                 OptionAutoCloseOnEnd = true,
                 OptionFixNestedTags = true
@@ -206,7 +213,7 @@
         /// </summary>
         /// <param name="linkType">application/rss+xml or application/atom+xml or ...</param>
         /// <returns>the feed type</returns>
-        private static FeedType GetFeedTypeFromLinkType(string linkType)
+        public static FeedType GetFeedTypeFromLinkType(string linkType)
         {
             if (linkType.Contains("application/rss"))
                 return FeedType.Rss;

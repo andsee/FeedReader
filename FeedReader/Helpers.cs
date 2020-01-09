@@ -40,6 +40,12 @@
         /// <returns>Content as string</returns>
         public static async Task<string> DownloadAsync(string url, bool autoRedirect = true)
         {
+            var r = await DownloadAsyncWithMessage(url, autoRedirect);
+            return r.Item1;
+        }
+
+        public static async Task<Tuple<string, HttpResponseMessage>> DownloadAsyncWithMessage(string url, bool autoRedirect = true)
+        {
             url = System.Net.WebUtility.UrlDecode(url);
             HttpResponseMessage response;
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
@@ -51,7 +57,7 @@
             }
             if (!response.IsSuccessStatusCode)
             {
-                if (autoRedirect && (int)response.StatusCode == 308) // moved permanently
+                if (autoRedirect && ((int)response.StatusCode == 308 || (int)response.StatusCode == 301)) // moved permanently
                 {
                     url = response.Headers?.Location?.AbsoluteUri ?? url;
                 }
@@ -62,7 +68,7 @@
                 }
             }
 
-            return Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync());
+            return new Tuple<string, HttpResponseMessage>(Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync()),response);
         }
 
         /// <summary>
