@@ -102,11 +102,22 @@
             this.DC = new DublinCore(item);
             this.Source = new FeedItemSource(item.GetElement("source"));
 
+            var baseMedia = new Media(item);
+
             var media = item.GetElements("media", "content");
             this.Media = media.Select(x => new Media(x)).ToList();
 
             var mediaGroups = item.GetElements("media", "group");
             this.MediaGroups = mediaGroups.Select(x => new MediaGroup(x)).ToList();
+
+            if (MediaGroups.Count == 0 && Media.Count == 0)
+            {
+                // Consider using the base media if it has anything in it....
+                if (baseMedia.Thumbnails.Count != 0 || !string.IsNullOrWhiteSpace(baseMedia.Url))
+                {
+                    Media.Add(baseMedia);
+                }
+            }
 
             var categories = item.GetElements("category");
             this.Categories = categories.Select(x => x.GetValue()).ToList();

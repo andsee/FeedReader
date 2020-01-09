@@ -18,7 +18,7 @@ namespace CodeHollow.FeedReader.Feeds.MediaRSS
         /// Reads a rss feed item enclosure based on the xml given in element
         /// </summary>
         /// <param name="element">enclosure element as xml</param>
-        public Media(XElement element)
+        public Media(XElement element, Media baseMedia = null)
         {
             this.Url = element.GetAttributeValue("url");
             this.FileSize = Helpers.TryParseInt(element.GetAttributeValue("fileSize"));
@@ -32,6 +32,18 @@ namespace CodeHollow.FeedReader.Feeds.MediaRSS
 
             var thumbnails = element.GetElements("media", "thumbnail");
             this.Thumbnails = thumbnails.Select(x => new Thumbnail(x)).ToList();
+            if (baseMedia != null)
+            {
+                if (string.IsNullOrWhiteSpace(this.Url)) this.Url = baseMedia.Url;
+                if (!this.FileSize.HasValue) this.FileSize = baseMedia.FileSize;
+                if (string.IsNullOrWhiteSpace(this.Type)) this.Type = baseMedia.Type;
+                if (!this.isDefault.HasValue) this.isDefault = baseMedia.isDefault;
+                if (!this.Duration.HasValue) this.Duration = baseMedia.Duration;
+                if (!this.Height.HasValue) this.Height = baseMedia.Height;
+                if (!this.Width.HasValue) this.Width = baseMedia.Width;
+                if (string.IsNullOrWhiteSpace(this.Language)) this.Language = baseMedia.Language;
+                if (Thumbnails.Count == 0) this.Thumbnails = baseMedia.Thumbnails;
+            }
 
         }
 
