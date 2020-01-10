@@ -3,14 +3,14 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
-    using System.Text.RegularExpressions;
+    using System.Threading;
     using System.Threading.Tasks;
     using HtmlAgilityPack;
     using Parser;
 
     /// <summary>
     /// The static FeedReader class which allows to read feeds from a given url. Use it to
-    /// parse a feed from an url <see cref="Read(string)"/>, a file <see cref="ReadFromFile(string)"/>
+    /// parse a feed from an url <see cref="Read(string)"/>, a file <see cref="ReadFromFile(string)"/> or <see cref="ReadFromFileAsync(string)"/>, a byte array <see cref="ReadFromByteArray(byte[])"/>
     /// or a string <see cref="ReadFromString(string)"/>. If the feed url is not known, <see cref="ParseFeedUrlsFromHtml(string)"/>
     /// returns all feed links on a given page.
     /// </summary>
@@ -82,7 +82,24 @@
         [Obsolete("Use GetFeedUrlsFromUrlAsync method")]
         public static IEnumerable<HtmlFeedLink> GetFeedUrlsFromUrl(string url)
         {
-            return GetFeedUrlsFromUrlAsync(url).Result;
+            return GetFeedUrlsFromUrlAsync(url).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Opens a webpage and reads all feed urls from it (link rel="alternate" type="application/...")
+        /// </summary>
+        /// <param name="url">the url of the page</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
+        /// /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
+        /// <returns>a list of links including the type and title, an empty list if no links are found</returns>
+        /// <example>FeedReader.GetFeedUrlsFromUrl("codehollow.com"); // returns a list of all available feeds at
+        /// https://codehollow.com </example>
+        public static async Task<IEnumerable<HtmlFeedLink>> GetFeedUrlsFromUrlAsync(string url, CancellationToken cancellationToken, bool autoRedirect = true)
+        {
+            url = GetAbsoluteUrl(url);
+            string pageContent = await Helpers.DownloadAsync(url, cancellationToken, autoRedirect).ConfigureAwait(false);
+            var links = ParseFeedUrlsFromHtml(pageContent);
+            return links;
         }
 
         /// <summary>
@@ -93,12 +110,9 @@
         /// <returns>a list of links including the type and title, an empty list if no links are found</returns>
         /// <example>FeedReader.GetFeedUrlsFromUrl("codehollow.com"); // returns a list of all available feeds at
         /// https://codehollow.com </example>
-        public static async Task<IEnumerable<HtmlFeedLink>> GetFeedUrlsFromUrlAsync(string url, bool autoRedirect = true)
+        public static Task<IEnumerable<HtmlFeedLink>> GetFeedUrlsFromUrlAsync(string url, bool autoRedirect = true)
         {
-            url = GetAbsoluteUrl(url);
-            string pageContent = await Helpers.DownloadAsync(url, autoRedirect);
-            var links = ParseFeedUrlsFromHtml(pageContent);
-            return links;
+            return GetFeedUrlsFromUrlAsync(url, CancellationToken.None, autoRedirect);
         }
 
         /// <summary>
@@ -109,7 +123,18 @@
         [Obsolete("Use the ParseFeedUrlsAsStringAsync method")]
         public static string[] ParseFeedUrlsAsString(string url)
         {
-            return ParseFeedUrlsAsStringAsync(url).Result;
+            return ParseFeedUrlsAsStringAsync(url).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Opens a webpage and reads all feed urls from it (link rel="alternate" type="application/...")
+        /// </summary>
+        /// <param name="url">the url of the page</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
+        /// <returns>a list of links, an empty list if no links are found</returns>
+        public static async Task<string[]> ParseFeedUrlsAsStringAsync(string url, CancellationToken cancellationToken)
+        {
+            return (await GetFeedUrlsFromUrlAsync(url, cancellationToken).ConfigureAwait(false)).Select(x => x.Url).ToArray();
         }
 
         /// <summary>
@@ -117,9 +142,9 @@
         /// </summary>
         /// <param name="url">the url of the page</param>
         /// <returns>a list of links, an empty list if no links are found</returns>
-        public static async Task<string[]> ParseFeedUrlsAsStringAsync(string url)
+        public static Task<string[]> ParseFeedUrlsAsStringAsync(string url)
         {
-            return (await GetFeedUrlsFromUrlAsync(url)).Select(x => x.Url).ToArray();
+            return ParseFeedUrlsAsStringAsync(url, CancellationToken.None);
         }
 
         /// <summary>
@@ -129,37 +154,8 @@
         /// <returns>all RSS/feed links</returns>
         public static IEnumerable<HtmlFeedLink> ParseFeedUrlsFromHtml(string htmlContent)
         {
-            // sample link:
-            // <link rel="alternate" type="application/rss+xml" title="Microsoft Bot Framework Blog" href="http://blog.botframework.com/feed.xml">
-            // <link rel="alternate" type="application/atom+xml" title="Aktuelle News von heise online" href="https://www.heise.de/newsticker/heise-atom.xml">
-            var htmlDoc = new HtmlDocument()
-            {
-                OptionAutoCloseOnEnd = true,
-                OptionFixNestedTags = true
-            };
-
-            htmlDoc.LoadHtml(htmlContent);
-
-            if (htmlDoc.DocumentNode != null)
-            {
-                var links = htmlDoc.DocumentNode?.SelectNodes("//link");
-                if (links == null)
-                    yield break; // no links
-
-                var nodes = links.Where(
-                    x => x.Attributes["type"] != null &&
-                    (x.Attributes["type"].Value.Contains("application/rss") || x.Attributes["type"].Value.Contains("application/atom")));
-
-                foreach (var node in nodes)
-                {
-                    yield return new HtmlFeedLink()
-                    {
-                        Title = node.Attributes["title"]?.Value?.HtmlDecode(),
-                        Url = node.Attributes["href"]?.Value.HtmlDecode(),
-                        FeedType = GetFeedTypeFromLinkType(node.Attributes["type"].Value.HtmlDecode())
-                    };
-                }
-            }
+            // left the method here for downward compatibility
+            return Helpers.ParseFeedUrlsFromHtml(htmlContent);
         }
 
         /// <summary>
@@ -171,7 +167,21 @@
         [Obsolete("Use ReadAsync method")]
         public static Feed Read(string url)
         {
-            return ReadAsync(url).Result;
+            return ReadAsync(url).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// reads a feed from an url. the url must be a feed. Use ParseFeedUrlsFromHtml to
+        /// parse the feeds from a url which is not a feed.
+        /// </summary>
+        /// <param name="url">the url to a feed</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
+        /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
+        /// <returns>parsed feed</returns>
+        public static async Task<Feed> ReadAsync(string url, CancellationToken cancellationToken, bool autoRedirect = true)
+        {
+            var feedContent = await Helpers.DownloadBytesAsync(GetAbsoluteUrl(url), cancellationToken, autoRedirect).ConfigureAwait(false);
+            return ReadFromByteArray(feedContent);
         }
 
         /// <summary>
@@ -181,10 +191,9 @@
         /// <param name="url">the url to a feed</param>
         /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
         /// <returns>parsed feed</returns>
-        public static async Task<Feed> ReadAsync(string url, bool autoRedirect = true)
+        public static Task<Feed> ReadAsync(string url, bool autoRedirect = true)
         {
-            string feedContent = await Helpers.DownloadAsync(GetAbsoluteUrl(url), autoRedirect);
-            return ReadFromString(feedContent);
+            return ReadAsync(url, CancellationToken.None, autoRedirect);
         }
 
         /// <summary>
@@ -194,8 +203,43 @@
         /// <returns>parsed feed</returns>
         public static Feed ReadFromFile(string filePath)
         {
-            string feedContent = System.IO.File.ReadAllText(filePath);
-            return ReadFromString(feedContent);
+            var feedContent = System.IO.File.ReadAllBytes(filePath);
+            return ReadFromByteArray(feedContent);
+        }
+
+        /// <summary>
+        /// reads a feed from a file
+        /// </summary>
+        /// <param name="filePath">the path to the feed file</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
+        /// <returns>parsed feed</returns>
+        public static async Task<Feed> ReadFromFileAsync(string filePath, CancellationToken cancellationToken)
+        {
+            byte[] result;
+#if NETCOREAPP2_1
+            {
+                result = await System.IO.File.ReadAllBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
+            }
+#else
+            {
+                using (var stream = System.IO.File.Open(filePath, System.IO.FileMode.Open))
+                {
+                    result = new byte[stream.Length];
+                    await stream.ReadAsync(result, 0, (int)stream.Length, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            #endif
+            return ReadFromByteArray(result);
+        }
+
+        /// <summary>
+        /// reads a feed from a file
+        /// </summary>
+        /// <param name="filePath">the path to the feed file</param>
+        /// <returns>parsed feed</returns>
+        public static Task<Feed> ReadFromFileAsync(string filePath)
+        {
+            return ReadFromFileAsync(filePath, CancellationToken.None);
         }
 
         /// <summary>
@@ -209,19 +253,14 @@
         }
 
         /// <summary>
-        /// read the rss feed type from the type statement of an html link
+        /// reads a feed from the bytearray <paramref name="feedContent"/>
+        /// This could be useful if some special encoding is used.
         /// </summary>
-        /// <param name="linkType">application/rss+xml or application/atom+xml or ...</param>
-        /// <returns>the feed type</returns>
-        public static FeedType GetFeedTypeFromLinkType(string linkType)
+        /// <param name="feedContent"></param>
+        /// <returns></returns>
+        public static Feed ReadFromByteArray(byte[] feedContent)
         {
-            if (linkType.Contains("application/rss"))
-                return FeedType.Rss;
-
-            if (linkType.Contains("application/atom"))
-                return FeedType.Atom;
-
-            throw new InvalidFeedLinkException($"The link type '{linkType}' is not a valid feed link!");
+            return FeedParser.GetFeed(feedContent);
         }
     }
 }

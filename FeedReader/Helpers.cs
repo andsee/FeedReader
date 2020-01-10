@@ -1,10 +1,15 @@
 ﻿namespace CodeHollow.FeedReader
 {
-    using CodeHollow.FeedReader.Feeds.MediaRSS;
+    using CodeHollow.FeedReader.Parser;
+    using Feeds.MediaRSS;
     using System;
+    using System.Collections.Generic;
     using System.Globalization;
+    using System.Linq;
     using System.Net.Http;
     using System.Text;
+    using System.Text.RegularExpressions;
+    using System.Threading;
     using System.Threading.Tasks;
 
     /// <summary>
@@ -29,22 +34,23 @@
         [Obsolete("Use the DownloadAsync method")]
         public static string Download(string url)
         {
-            return DownloadAsync(url).Result;
+            return DownloadAsync(url).GetAwaiter().GetResult();
         }
 
         /// <summary>
         /// Download the content from an url
         /// </summary>
         /// <param name="url">correct url</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
         /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
-        /// <returns>Content as string</returns>
-        public static async Task<string> DownloadAsync(string url, bool autoRedirect = true)
+        /// <returns>Content as byte array</returns>
+        public static async Task<byte[]> DownloadBytesAsync(string url, CancellationToken cancellationToken, bool autoRedirect = true)
         {
-            var r = await DownloadAsyncWithMessage(url, autoRedirect);
+            var r = await DownloadAsyncWithMessage(url, autoRedirect, cancellationToken);
             return r.Item1;
         }
 
-        public static async Task<Tuple<string, HttpResponseMessage>> DownloadAsyncWithMessage(string url, bool autoRedirect = true)
+        public static async Task<Tuple<byte[], HttpResponseMessage>> DownloadAsyncWithMessage(string url, CancellationToken cancellationToken, bool autoRedirect = true)
         {
             url = System.Net.WebUtility.UrlDecode(url);
             HttpResponseMessage response;
@@ -53,22 +59,63 @@
                 request.Headers.TryAddWithoutValidation(ACCEPT_HEADER_NAME, ACCEPT_HEADER_VALUE);
                 request.Headers.TryAddWithoutValidation(USER_AGENT_NAME, USER_AGENT_VALUE);
 
-                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
             }
             if (!response.IsSuccessStatusCode)
             {
-                if (autoRedirect && ((int)response.StatusCode == 308 || (int)response.StatusCode == 301)) // moved permanently
+                var statusCode = (int)response.StatusCode;
+                // redirect if statuscode = 301 - Moved Permanently, 302 - Moved temporarly 308 - Permanent redirect
+                if (autoRedirect && (statusCode == 301 || statusCode == 302 || statusCode == 308))
                 {
                     url = response.Headers?.Location?.AbsoluteUri ?? url;
                 }
 
                 using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                 {
-                    response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+                    response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
                 }
             }
+            var content = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);            
+            return new Tuple<byte[], HttpResponseMessage>(content,response);
+        }
 
-            return new Tuple<string, HttpResponseMessage>(Encoding.UTF8.GetString(await response.Content.ReadAsByteArrayAsync()),response);
+        /// <summary>
+        /// Download the content from an url
+        /// </summary>
+        /// <param name="url">correct url</param>
+        /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
+        /// <returns>Content as byte array</returns>
+        public static Task<byte[]> DownloadBytesAsync(string url, bool autoRedirect = true)
+        {
+            return DownloadBytesAsync(url, CancellationToken.None, autoRedirect);
+                }
+
+        /// <summary>
+        /// Download the content from an url and returns it as utf8 encoded string.
+        /// Preferred way is to use <see cref="DownloadBytesAsync(string, bool)"/> because it works
+        /// better with encoding.
+        /// </summary>
+        /// <param name="url">correct url</param>
+        /// <param name="cancellationToken">token to cancel operation</param>
+        /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
+        /// <returns>Content as string</returns>
+        public static async Task<string> DownloadAsync(string url, CancellationToken cancellationToken, bool autoRedirect = true)
+        {
+            var content = await DownloadBytesAsync(url, cancellationToken, autoRedirect).ConfigureAwait(false);
+            return Encoding.UTF8.GetString(content);
+            }
+
+        /// <summary>
+        /// Download the content from an url and returns it as utf8 encoded string.
+        /// Preferred way is to use <see cref="DownloadBytesAsync(string, bool)"/> because it works
+        /// better with encoding.
+        /// </summary>
+        /// <param name="url">correct url</param>
+        /// <param name="autoRedirect">autoredirect if page is moved permanently</param>
+        /// <returns>Content as string</returns>
+        public static Task<string> DownloadAsync(string url, bool autoRedirect = true)
+        {
+            return DownloadAsync(url, CancellationToken.None, autoRedirect);
         }
 
         /// <summary>
@@ -166,6 +213,86 @@
             }
 
             return null;
+        }
+        
+        /// <summary>
+        /// Returns a HtmlFeedLink object from a linktag (link href="" type="")
+        /// only support application/rss and application/atom as type
+        /// if type is not supported, null is returned
+        /// </summary>
+        /// <param name="input">link tag, e.g. &lt;link rel="alternate" type="application/rss+xml" title="codehollow &gt; Feed" href="https://codehollow.com/feed/" /&gt;</param>
+        /// <returns>Parsed HtmlFeedLink</returns>
+        public static HtmlFeedLink GetFeedLinkFromLinkTag(string input)
+        {
+            string linkTag = input.HtmlDecode();
+            string type = GetAttributeFromLinkTag("type", linkTag).ToLower();
+
+            if (!type.Contains("application/rss") && !type.Contains("application/atom"))
+                return null;
+
+            HtmlFeedLink hfl = new HtmlFeedLink();
+            string title = GetAttributeFromLinkTag("title", linkTag);
+            string href = GetAttributeFromLinkTag("href", linkTag);
+            hfl.Title = title;
+            hfl.Url = href;
+            hfl.FeedType = type.Contains("rss") ? FeedType.Rss : FeedType.Atom;
+            return hfl;
+        }
+
+        /// <summary>
+        /// Parses RSS links from html page and returns all links
+        /// </summary>
+        /// <param name="htmlContent">the content of the html page</param>
+        /// <returns>all RSS/feed links</returns>
+        public static IEnumerable<HtmlFeedLink> ParseFeedUrlsFromHtml(string htmlContent)
+        {
+            // sample link:
+            // <link rel="alternate" type="application/rss+xml" title="Microsoft Bot Framework Blog" href="http://blog.botframework.com/feed.xml">
+            // <link rel="alternate" type="application/atom+xml" title="Aktuelle News von heise online" href="https://www.heise.de/newsticker/heise-atom.xml">
+
+            Regex rex = new Regex("<link.*rel=\"alternate\".*>");
+
+            List<HtmlFeedLink> result = new List<HtmlFeedLink>();
+
+            foreach (Match m in rex.Matches(htmlContent))
+            {
+                var hfl = GetFeedLinkFromLinkTag(m.Value);
+                if (hfl != null)
+                    result.Add(hfl);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// read the rss feed type from the type statement of an html link
+        /// </summary>
+        /// <param name="linkType">application/rss+xml or application/atom+xml or ...</param>
+        /// <returns>the feed type</returns>
+        private static FeedType GetFeedTypeFromLinkType(string linkType)
+        {
+            if (linkType.Contains("application/rss"))
+                return FeedType.Rss;
+
+            if (linkType.Contains("application/atom"))
+                return FeedType.Atom;
+
+            throw new InvalidFeedLinkException($"The link type '{linkType}' is not a valid feed link!");
+        }
+
+        /// <summary>
+        /// reads an attribute from an html tag
+        /// </summary>
+        /// <param name="attribute">name of the attribute, e.g. title</param>
+        /// <param name="htmlTag">the html tag, e.g. &lt;link title="my title"&gt;</param>
+        /// <returns>the value of the attribute, e.g. my title</returns>
+        private static string GetAttributeFromLinkTag(string attribute, string htmlTag)
+        {
+            var res = Regex.Match(htmlTag, attribute + "\\s*=\\s*\"(?<val>[^\"]*)\"", RegexOptions.IgnoreCase & RegexOptions.IgnorePatternWhitespace);
+
+            if (res.Groups.Count > 1)
+                return res.Groups[1].Value;
+            return string.Empty;
         }
     }
 }
